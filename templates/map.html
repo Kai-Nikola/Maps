@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Map with HERE API - Navigation</title>
+
+    <!-- HERE Maps JavaScript API -->
+    <script src="https://js.api.here.com/v3/3.1/mapsjs-core.js" type="text/javascript" charset="utf-8"></script>
+    <script src="https://js.api.here.com/v3/3.1/mapsjs-service.js" type="text/javascript" charset="utf-8"></script>
+    <script src="https://js.api.here.com/v3/3.1/mapsjs-ui.js" type="text/javascript" charset="utf-8"></script>
+    <script src="https://js.api.here.com/v3/3.1/mapsjs-mapevents.js" type="text/javascript" charset="utf-8"></script>
+    <link rel="stylesheet" type="text/css" href="https://js.api.here.com/v3/3.1/mapsjs-ui.css" />
+    
+    <style>
+        #map {
+            width: 100%;
+            height: 0%;
+            background: grey;
+        }
+        .directions {
+            margin-top: 20px;
+        }
+        .direction-item {
+            margin-bottom: 10px;
+        }
+        .location-list {
+            margin-top: 20px;
+        }
+        .location-item {
+            margin-bottom: 10px;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <h2>Turn-by-Turn Navigation</h2>
+
+    <!-- Map Container -->
+    <div id="map"></div>
+
+    <!-- Directions List -->
+    <div class="directions">
+        <h3>Directions</h3>
+        <ul id="directions-list"></ul>
+    </div>
+
+    <!-- List of ATMs Found -->
+    <div class="location-list">
+        <h3>Found Locations</h3>
+        <ul id="locations-list">
+            {% for location in locations %}
+            <li class="location-item">
+                <strong>{{ location.title }}</strong><br>
+                Address: {{ location.address }}<br>
+                Distance: {{ location.distance }} km<br>
+                Time: {{ location.time }} minutes
+            </li>
+            {% endfor %}
+        </ul>
+    </div>
+
+    <script>
+        var platform = new H.service.Platform({
+            apikey: '{{ api_key }}'
+        });
+        var defaultLayers = platform.createDefaultLayers();
+        var map = new H.Map(document.getElementById('map'),
+            defaultLayers.vector.normal.map, {
+            center: {lat: {{ origin_lat }}, lng: {{ origin_lon }} },
+            zoom: 14
+        });
+
+        var behavior = new H.mapevents.Behavior(new H.mapevents.MapEvents(map));
+        var ui = H.ui.UI.createDefault(map, defaultLayers);
+
+        var router = platform.getRoutingService(null, 8);
+        var routeRequestParams = {
+            transportMode: 'car',
+            origin: '{{ origin_lat }},{{ origin_lon }}',
+            destination: '{{ nearest_location.lat }},{{ nearest_location.lon }}',
+            return: 'polyline,turnByTurnActions,actions,instructions'
+        };
+
+        router.calculateRoute(routeRequestParams, function(result) {
+            if (result.routes.length) {
+                var route = result.routes[0];
+                var routeShape = route.sections[0].polyline;
+
+                // Decode the polyline into a series of points
+                var lineString = H.geo.LineString.fromFlexiblePolyline(routeShape);
+
+                // Create a polyline to display the route
+                var routeLine = new H.map.Polyline(lineString, {
+                    style: { strokeColor: 'blue', lineWidth: 5 }
+                });
+
+                // Add the route polyline to the map
+                map.addObject(routeLine);
+
+                // Adjust map viewport to show the entire route
+                map.getViewModel().setLookAtData({bounds: routeLine.getBoundingBox()});
+
+                // Get turn-by-turn instructions
+                var directionsList = document.getElementById('directions-list');
+                route.sections[0].actions.forEach(function(action) {
+                    var li = document.createElement('li');
+                    li.className = 'direction-item';
+                    li.innerHTML = action.instruction;
+                    directionsList.appendChild(li);
+                });
+            }
+        }, function(error) {
+            console.log('Routing error:', error);
+        });
+
+        // Real-time location tracking and updating the route
+        if (navigator.geolocation) {
+            navigator.geolocation.watchPosition(function(position) {
+                var userLat = position.coords.latitude;
+                var userLon = position.coords.longitude;
+
+                // Center the map on the user's current location
+                map.setCenter({ lat: userLat, lng: userLon });
+
+                // You can also update the route if the user deviates
+                var routeRequestParamsUpdated = {
+                    transportMode: 'car',
+                    origin: `${userLat},${userLon}`,
+                    destination: '{{ nearest_location.lat }},{{ nearest_location.lon }}',
+                    return: 'polyline,turnByTurnActions,actions,instructions'
+                };
+
+                router.calculateRoute(routeRequestParamsUpdated, function(result) {
+                    if (result.routes.length) {
+                        // Remove old route
+                        map.removeObjects(map.getObjects());
+
+                        // Re-draw new route based on current location
+                        var routeUpdated = result.routes[0];
+                        var routeShapeUpdated = routeUpdated.sections[0].polyline;
+                        var lineStringUpdated = H.geo.LineString.fromFlexiblePolyline(routeShapeUpdated);
+
+                        var routeLineUpdated = new H.map.Polyline(lineStringUpdated, {
+                            style: { strokeColor: 'green', lineWidth: 5 }
+                        });
+
+                        map.addObject(routeLineUpdated);
+
+                        // Adjust map to show the updated route
+                        map.getViewModel().setLookAtData({ bounds: routeLineUpdated.getBoundingBox() });
+                    }
+                });
+            });
+        }
+    </script>
+</body>
+</html>
